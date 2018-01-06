@@ -18,7 +18,7 @@ class DefaultNameConan(ConanFile):
         cmake = CMake(self)
         if self.options["Boost"].header_only:
             cmake.definitions["HEADER_ONLY"] = "TRUE"
-        if self.options["Boost"].python:
+        if not self.options["Boost"].without_python:
             cmake.definitions["WITH_PYTHON"] = "TRUE"
         cmake.configure()
         cmake.build()

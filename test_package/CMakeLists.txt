@@ -4,6 +4,9 @@ cmake_minimum_required(VERSION 2.8)
 set(Boost_DEBUG 1)
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 
+set(BOOST_LIBRARYDIR ${CONAN_LIB_DIRS_BOOST})
+set(BOOST_INCLUDEDIR ${CONAN_INCLUDE_DIRS_BOOST})
+
 CONAN_BASIC_SETUP()
 
 IF(NOT HEADER_ONLY)
