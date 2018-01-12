@@ -7,7 +7,7 @@ from conans import tools
 class BoostConan(ConanFile):
     name = "Boost"
     version = "1.66.0"
-    settings = "os", "arch", "compiler", "build_type"
+    settings = "os", "compiler", "build_type", "arch", "os_build", "arch_build"
     bzip2_version = "1.0.6"
     bzip2_md5 = "00b516f4704d4a7cb50a1d97e6e8e15b"
     zlib_version = "1.2.11"
@@ -120,6 +120,14 @@ class BoostConan(ConanFile):
             self.options.remove("fPIC")
             self.options.remove("layout")
 
+
+        if self.settings.os == "Windows" and self.settings.compiler == "gcc":
+            # As for Mingw gcc we don't have (yet) the compiler_redirect infrastructure,
+            # disabling the Boost.Python library to avoid hitting this problem:
+            # https://github.com/Alexpux/MINGW-packages/issues/3224
+            # https://stackoverflow.com/questions/10660524/error-building-boost-1-49-0-with-gcc-4-7-0/12124708#12124708
+            self.options.without_python = True
+
     def package_id(self):
         if self.options.header_only:
             self.info.header_only()
@@ -194,7 +202,8 @@ class BoostConan(ConanFile):
             else "./bootstrap.sh --with-toolset=%s" % with_toolset
 
         if self.settings.os == "Windows" and self.settings.compiler == "gcc":
-            command += " mingw"
+            # bootstrap run for Mingw
+            command += " gcc"
 
         if self.settings.os == "Windows" and self.settings.compiler == "Visual Studio":
             command = "%s && %s" % (tools.vcvars_command(self.settings), command)
@@ -235,16 +244,11 @@ class BoostConan(ConanFile):
         # Properties: Toolset
         if self.settings.compiler == "Visual Studio":
             args.append("toolset=msvc-%s" % self._msvc_version())
-        elif not self.settings.os == "Windows" and self.settings.compiler == "gcc" and \
-                str(self.settings.compiler.version)[0] >= "5":
-            # For GCC >= v5 we only need the major otherwise Boost doesn't find the compiler
-            # The NOT windows check is necessary to exclude MinGW:
-            args.append("toolset=%s-%s" % (self.settings.compiler,
-                                           str(self.settings.compiler.version)[0]))
         elif str(self.settings.compiler) in ["clang", "gcc"]:
-            # For GCC < v5 and Clang we need to provide the entire version string
-            args.append("toolset=%s-%s" % (self.settings.compiler,
-                                           str(self.settings.compiler.version)))
+            # For clang / gcc we use the toolset as the compiler name (without any version).
+            # (see linux_compiler_redirect)
+            args.append("toolset=%s" % self.settings.compiler)
+
         # Other properties:
         args.append("variant=%s" % str(self.settings.build_type).lower())
         args.append("address-model=%s" % ("32" if self.settings.arch == "x86" else "64"))
@@ -322,6 +326,8 @@ class BoostConan(ConanFile):
 
         # LIBCXX DEFINITION FOR BOOST B2
         try:
+            # Note: See https://gcc.gnu.org/onlinedocs/libstdc++/manual/using_dual_abi.html
+            # the version of C++ is orthogonal to the stdc++ one.
             if str(self.settings.compiler.libcxx) == "libstdc++":
                 args.append("define=_GLIBCXX_USE_CXX11_ABI=0")
             elif str(self.settings.compiler.libcxx) == "libstdc++11":
