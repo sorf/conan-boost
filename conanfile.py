@@ -254,6 +254,8 @@ class BoostConan(ConanFile):
             # For clang / gcc we use the toolset as the compiler name (without any version).
             # (see linux_compiler_redirect)
             args.append("toolset=%s" % self.settings.compiler)
+        elif str(self.settings.compiler) == "apple-clang":
+            args.append("toolset=darwin")
 
         # Other properties:
         args.append("variant=%s" % str(self.settings.build_type).lower())
