@@ -120,13 +120,19 @@ class BoostConan(ConanFile):
             self.options.remove("fPIC")
             self.options.remove("layout")
 
-
         if self.settings.os == "Windows" and self.settings.compiler == "gcc":
             # As for Mingw gcc we don't have (yet) the compiler_redirect infrastructure,
             # disabling the Boost.Python library to avoid hitting this problem:
             # https://github.com/Alexpux/MINGW-packages/issues/3224
             # https://stackoverflow.com/questions/10660524/error-building-boost-1-49-0-with-gcc-4-7-0/12124708#12124708
             self.options.without_python = True
+            # Also we need to build with _GLIBCXX_USE_CXX11_ABI = 1 to avoid linker errors such as:
+            #   libstdc++.a(cow-stdexcept.o):cow-stdexcept.cc:(.text$_ZNSt13runtime_errorC2ERKS_+0x0):
+            #   multiple definition of `std::runtime_error::runtime_error(std::runtime_error const&)'
+            # So, we set/overwrite the libcxx setting to libstdc++11
+            if not self.settings.compiler.libcxx or self.settings.compiler.libcxx != "libstdc++11":
+                self.output.warn('Forcing compiler.libcxx to be "libstdc++11"')
+                self.settings.compiler.libcxx = "libstdc++11"
 
     def package_id(self):
         if self.options.header_only:
@@ -261,9 +267,13 @@ class BoostConan(ConanFile):
         args.append('-sZLIB_SOURCE="%s"' %
                     os.path.join(abs_source_folder, "zlib-%s" % self.zlib_version))
 
-        # The CXX args
-        args.extend(self._get_build_args_cxx())
-
+        # The compiler and linker flags
+        cppflags, linkflags, defines = self._get_build_cppflags_linkflags_defines()
+        
+        args.append('cxxflags="%s"' % " ".join(cppflags) if cppflags else "")
+        args.append('linkflags="%s"' % " ".join(linkflags) if linkflags else "")
+        for define in defines:
+            args.append('define=%s' % define)
         return args
 
     def _get_build_args_libraries(self):
@@ -306,44 +316,44 @@ class BoostConan(ConanFile):
                 args.append(option_name)
         return args
 
-    def _get_build_args_cxx(self):
-        args = []
-        cxx_args = []
+    def _get_build_cppflags_linkflags_defines(self):
+        """ C++ compiler flags, linker flags and defines.
+            They are used both in build() and package_info(). """
+        cppflags = []
+        linkflags = []
+        defines = []
 
         # C++ standard
         if self.options.cppstd != "default":
             if self.settings.compiler != "Visual Studio":
-                cxx_args.append("-std=c++%s" % self.options.cppstd)
+                cppflags.append("-std=c++%s" % self.options.cppstd)
             else:
-                cxx_args.append("/std:c++%s" % self.options.cppstd)
-                if self.options.cppstd == "17":
-                    cxx_args.append("/D_HAS_AUTO_PTR_ETC=1")
+                cppflags.append("/std:c++%s" % self.options.cppstd)
+                defines.append("_HAS_AUTO_PTR_ETC=1")
 
-        # fPIC DEFINITION
+        # FPIC
         if self.settings.compiler != "Visual Studio":
             if self.options.fPIC:
-                cxx_args.append("-fPIC")
+                cppflags.append("-fPIC")
 
-        # LIBCXX DEFINITION FOR BOOST B2
-        try:
-            # Note: See https://gcc.gnu.org/onlinedocs/libstdc++/manual/using_dual_abi.html
-            # the version of C++ is orthogonal to the stdc++ one.
+        # The libcxx settings
+        # Note: See https://gcc.gnu.org/onlinedocs/libstdc++/manual/using_dual_abi.html
+        # the version of C++ is orthogonal to the stdc++ one.
+        if self.settings.compiler == "gcc" or "clang" in str(self.settings.compiler):
             if str(self.settings.compiler.libcxx) == "libstdc++":
-                args.append("define=_GLIBCXX_USE_CXX11_ABI=0")
+                defines.append("_GLIBCXX_USE_CXX11_ABI=0")
             elif str(self.settings.compiler.libcxx) == "libstdc++11":
-                args.append("define=_GLIBCXX_USE_CXX11_ABI=1")
-            if "clang" in str(self.settings.compiler):
-                if str(self.settings.compiler.libcxx) == "libc++":
-                    cxx_args.append("-stdlib=libc++")
-                    args.append('linkflags="-stdlib=libc++"')
-                else:
-                    cxx_args.append("-stdlib=libstdc++")
-        except:
-            pass
+                defines.append("_GLIBCXX_USE_CXX11_ABI=1")
 
-        cxx_args = 'cxxflags="%s"' % " ".join(cxx_args) if cxx_args else ""
-        args.append(cxx_args)
-        return args
+        if "clang" in str(self.settings.compiler):
+            if str(self.settings.compiler.libcxx) == "libc++":
+                cppflags.append("-stdlib=libc++")
+                linkflags.append("-stdlib=libc++")
+            else:
+                cppflags.append("-stdlib=libstdc++")
+                linkflags.append("-stdlib=libstdc++")
+
+        return cppflags, linkflags, defines
 
     def _msvc_version(self):
         if self.settings.compiler.version == "15":
@@ -366,7 +376,6 @@ class BoostConan(ConanFile):
 
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
-
         if self.options.without_test: # remove boost_unit_test_framework
             self.cpp_info.libs = [lib for lib in self.cpp_info.libs if "unit_test" not in lib]
 
@@ -378,6 +387,13 @@ class BoostConan(ConanFile):
             self.cpp_info.defines.append("BOOST_USE_STATIC_LIBS")
 
         if not self.options.header_only:
+            cppflags, linkflags, defines = self._get_build_cppflags_linkflags_defines()
+
+            self.cpp_info.cppflags.extend(cppflags)
+            self.cpp_info.sharedlinkflags.extend(linkflags)
+            self.cpp_info.exelinkflags.extend(linkflags)
+            self.cpp_info.defines.extend(defines)
+
             if not self.options.without_python:
                 if not self.options.shared:
                     self.cpp_info.defines.append("BOOST_PYTHON_STATIC_LIB")

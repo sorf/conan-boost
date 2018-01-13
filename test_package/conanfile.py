@@ -7,7 +7,7 @@ import sys
 class DefaultNameConan(ConanFile):
     name = "DefaultName"
     version = "0.1"
-    settings = "os", "compiler", "arch", "build_type"
+    settings = "os", "compiler", "build_type", "arch", "os_build", "arch_build"
     generators = "cmake"
 
     def configure(self):
@@ -41,7 +41,7 @@ class DefaultNameConan(ConanFile):
         self.copy(pattern="*.dylib", dst="bin", src="lib")
         
     def test(self):        
-        data_file = os.path.join(self.conanfile_directory, "data.txt")
+        data_file = os.path.join(self.source_folder, "data.txt")
         self.output.info("Running: lambda")
         self.run("cd bin && .%slambda < %s" % (os.sep, data_file))
         if not self.options["Boost"].header_only:
