@@ -389,13 +389,6 @@ class BoostConan(ConanFile):
             self.cpp_info.defines.append("BOOST_USE_STATIC_LIBS")
 
         if not self.options.header_only:
-            cppflags, linkflags, defines = self._get_build_cppflags_linkflags_defines()
-
-            self.cpp_info.cppflags.extend(cppflags)
-            self.cpp_info.sharedlinkflags.extend(linkflags)
-            self.cpp_info.exelinkflags.extend(linkflags)
-            self.cpp_info.defines.extend(defines)
-
             if not self.options.without_python:
                 if not self.options.shared:
                     self.cpp_info.defines.append("BOOST_PYTHON_STATIC_LIB")
