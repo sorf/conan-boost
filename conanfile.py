@@ -1,7 +1,14 @@
 import os
+import platform
+import re
 import shutil
+import subprocess
+import sys
 from conans import ConanFile
 from conans import tools
+
+if (sys.version_info.major, sys.version_info.minor) < (3, 5):
+    raise RuntimeError("Python 3.5 is required")
 
 
 class BoostConan(ConanFile):
@@ -110,22 +117,32 @@ class BoostConan(ConanFile):
         """ Second configuration step. Both settings and options have values, in this case
         we can force static library if MT was specified as runtime
         """
-        if self.settings.compiler == "Visual Studio" and \
-           self.options.shared and "MT" in str(self.settings.compiler.runtime):
-            self.options.shared = False
-
         if self.options.header_only:
             # Should be doable in conan_info() but the UX is not ready
             self.options.remove("shared")
             self.options.remove("fPIC")
             self.options.remove("layout")
 
-        if self.settings.os == "Windows" and self.settings.compiler == "gcc":
-            # As for Mingw gcc we don't have (yet) the compiler_redirect infrastructure,
-            # disabling the Boost.Python library to avoid hitting this problem:
-            # https://github.com/Alexpux/MINGW-packages/issues/3224
-            # https://stackoverflow.com/questions/10660524/error-building-boost-1-49-0-with-gcc-4-7-0/12124708#12124708
+        if self.settings.compiler == "Visual Studio" and \
+           self.options.shared and "MT" in str(self.settings.compiler.runtime):
+            self.options.shared = False
+            # The Python library is compiled with "MD", so we cannot link against it in "MT" builds
             self.options.without_python = True
+
+        # Disable Python build on Windows when:
+        if self.settings.os == "Windows":
+            if self.settings.compiler == "gcc":
+                # As for Mingw gcc we don't have (yet) the compiler_redirect infrastructure,
+                # disabling the Boost.Python library to avoid hitting this problem:
+                # https://github.com/Alexpux/MINGW-packages/issues/3224
+                # https://stackoverflow.com/questions/10660524/error-building-boost-1-49-0-with-gcc-4-7-0/12124708#12124708
+                self.options.without_python = True
+            if (self.settings.arch == "x86_64" and platform.architecture()[0] != "64bit") or \
+               (self.settings.arch == "x86" and platform.architecture()[0] != "32bit"):
+               # Python architecture should match the build one (32 vs 64 bit)
+                self.options.without_python = True
+
+        if self.settings.os == "Windows" and self.settings.compiler == "gcc":
             # Also we need to build with _GLIBCXX_USE_CXX11_ABI = 1 to avoid linker errors such as:
             #   libstdc++.a(cow-stdexcept.o):cow-stdexcept.cc:(.text$_ZNSt13runtime_errorC2ERKS_+0x0):
             #   multiple definition of `std::runtime_error::runtime_error(std::runtime_error const&)'
@@ -170,6 +187,7 @@ class BoostConan(ConanFile):
         if self.options.header_only:
             self.output.warn("Header only package, skipping build")
             return
+        self._check_build_settings()
 
         abs_source_folder = os.path.abspath(self.source_folder)
         abs_build_folder = os.path.abspath(".")
@@ -197,12 +215,41 @@ class BoostConan(ConanFile):
         self.output.info("Running: %s" % command)
         self.run(command)
 
+    def _check_build_settings(self):
+        if self.settings.compiler == "gcc":
+            self.output.info("Checking g++ version (expecting: %s)" %
+                             self.settings.compiler.version)
+            # the build will calling 'g++' without any version (the compiler_redirect support)
+            result = subprocess.run(
+                ["g++", "--version"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=True,
+                universal_newlines=True)
+            if not re.match(r"g\+\+ \(.*\) %s" % self.settings.compiler.version, result.stdout):
+                self.output.error("Expected version %s was not found in:\n%s" % (
+                    self.settings.compiler.version,
+                    result.stdout))
+                raise RuntimeError("Unexpected compiler version")
+
+    def _remove_if_exists(self, file):
+        if os.path.exists(file) and os.path.isfile(file):
+            os.remove(file)
+
     def _bootstrap(self, abs_source_folder):
         with_toolset = {"apple-clang": "darwin"}.get(str(self.settings.compiler),
                                                      str(self.settings.compiler))
 
         boost_source_folder = os.path.join(abs_source_folder, "boost")
         tools_build_folder = os.path.join(boost_source_folder, "tools", "build")
+
+        if self.settings.os == "Windows":
+            # Deleting old b2 binaries
+            self._remove_if_exists(tools_build_folder + "\\src\\engine\\bin.ntx86\\b2.exe")
+            self._remove_if_exists(tools_build_folder + "\\src\\engine\\bin.ntx86\\bjam.exe")
+            self._remove_if_exists(tools_build_folder + "\\src\\engine\\bin.ntx86_64\\bjam.exe")
+            self._remove_if_exists(tools_build_folder + "\\src\\engine\\bin.ntx86_64\\bjam.exe")
+
         command = "cd %s && " % tools_build_folder
         command += ".\\bootstrap" if self.settings.os == "Windows" \
             else "./bootstrap.sh --with-toolset=%s" % with_toolset
@@ -261,7 +308,11 @@ class BoostConan(ConanFile):
         args.append("variant=%s" % str(self.settings.build_type).lower())
         args.append("address-model=%s" % ("32" if self.settings.arch == "x86" else "64"))
         args.append("link=%s" % ("static" if not self.options.shared else "shared"))
-        args.append("runtime-link=shared")
+        if self.settings.compiler == "Visual Studio":
+            args.append("runtime-link=%s" % (
+                "static" if "MT" in str(self.settings.compiler.runtime) else "shared"))
+        else:
+            args.append("runtime-link=shared")
 
         # bzip and zlib
         args.append('-sBZIP2_SOURCE="%s"' %
@@ -305,6 +356,7 @@ class BoostConan(ConanFile):
             "--without-regex": self.options.without_regex,
             "--without-serialization": self.options.without_serialization,
             "--without-signals": self.options.without_signals,
+            "--without_stacktrace": self.options.without_stacktrace,
             "--without-system": self.options.without_system,
             "--without-test": self.options.without_test,
             "--without-thread": self.options.without_thread,

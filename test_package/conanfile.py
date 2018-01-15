@@ -31,8 +31,17 @@ class DefaultNameConan(ConanFile):
                     python_folder,
                     "libs",
                     python_lib_file_name)
+                for lib in self.deps_cpp_info.libs:
+                    if "python" in lib:
+                        cmake.definitions["BOOST_PYTHON_LIB"] = lib
+                        break
+
         if not self.options["Boost"].without_regex:
             cmake.definitions["WITH_REGEX"] = "TRUE"
+            for lib in self.deps_cpp_info.libs:
+                if "regex" in lib:
+                    cmake.definitions["BOOST_REGEX_LIB"] = lib
+                    break
         cmake.configure()
         cmake.build()
 
