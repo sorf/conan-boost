@@ -44,7 +44,7 @@ Project setup installs the library (and all his dependencies) and generates the 
 ### Windows Visual Studio 2017
 
     set CONAN_USERNAME=... (e.g. sorf)
-    python msvc141build.py
+    python vs15build.py
 
 ### Windows MinGW
 

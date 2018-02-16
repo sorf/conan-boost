@@ -10,11 +10,21 @@ from conans import tools
 if (sys.version_info.major, sys.version_info.minor) < (3, 5):
     raise RuntimeError("Python 3.5 is required")
 
+boost_git = 'https://github.com/boostorg/boost.git'
+
+# From from *1 (see below, b2 --show-libraries), also ordered following linkage order
+# see https://github.com/Kitware/CMake/blob/master/Modules/FindBoost.cmake to know the order
+
+lib_list = ['math', 'wave', 'container', 'exception', 'graph', 'iostreams', 'locale', 'log',
+            'program_options', 'random', 'regex', 'mpi', 'serialization', 'signals',
+            'coroutine', 'fiber', 'context', 'timer', 'thread', 'chrono', 'date_time',
+            'atomic', 'filesystem', 'system', 'graph_parallel', 'python',
+            'stacktrace', 'test', 'type_erasure']
 
 class BoostConan(ConanFile):
-    name = "Boost"
+    name = "boost"
     version = "1.66.0"
-    settings = "os", "compiler", "build_type", "arch", "os_build", "arch_build"
+    settings = "os", "arch", "compiler", "build_type"
     bzip2_version = "1.0.6"
     bzip2_md5 = "00b516f4704d4a7cb50a1d97e6e8e15b"
     zlib_version = "1.2.11"
@@ -27,98 +37,24 @@ class BoostConan(ConanFile):
         "shared": [True, False],
         "header_only": [True, False],
         "fPIC": [True, False],
-        "layout" : ["versioned", "tagged", "system"],
-        "without_atomic": [True, False],
-        "without_chrono": [True, False],
-        "without_container": [True, False],
-        "without_context": [True, False],
-        "without_coroutine": [True, False],
-        "without_coroutine2": [True, False],
-        "without_date_time": [True, False],
-        "without_exception": [True, False],
-        "without_fiber": [True, False],
-        "without_filesystem": [True, False],
-        "without_graph": [True, False],
-        "without_graph_parallel": [True, False],
-        "without_iostreams": [True, False],
-        "without_locale": [True, False],
-        "without_log": [True, False],
-        "without_math": [True, False],
-        "without_metaparse": [True, False],
-        "without_mpi": [True, False],
-        "without_poly_collection": [True, False],
-        "without_program_options": [True, False],
-        "without_python": [True, False],
-        "without_random": [True, False],
-        "without_regex": [True, False],
-        "without_serialization": [True, False],
-        "without_signals": [True, False],
-        "without_stacktrace": [True, False],
-        "without_system": [True, False],
-        "without_test": [True, False],
-        "without_thread": [True, False],
-        "without_timer": [True, False],
-        "without_type_erasure": [True, False],
-        "without_wave": [True, False]
+        "layout" : ["versioned", "tagged", "system"]
     }
+    options.update({"without_%s" % libname: [True, False] for libname in lib_list})
 
-    default_options = "shared=False", \
-        "cppstd=17", \
-        "header_only=False", \
-        "fPIC=True", \
-        "layout=system", \
-        "without_atomic=False", \
-        "without_chrono=False", \
-        "without_container=False", \
-        "without_context=False", \
-        "without_coroutine=False", \
-        "without_coroutine2=False", \
-        "without_date_time=False", \
-        "without_exception=False", \
-        "without_fiber=False", \
-        "without_filesystem=False", \
-        "without_graph=False", \
-        "without_graph_parallel=False", \
-        "without_iostreams=False", \
-        "without_locale=False", \
-        "without_log=False", \
-        "without_math=False", \
-        "without_metaparse=False", \
-        "without_mpi=False", \
-        "without_poly_collection=False", \
-        "without_program_options=False", \
-        "without_python=False", \
-        "without_random=False", \
-        "without_regex=False", \
-        "without_serialization=False", \
-        "without_signals=False", \
-        "without_stacktrace=False", \
-        "without_system=False", \
-        "without_test=False", \
-        "without_thread=False", \
-        "without_timer=False", \
-        "without_type_erasure=False", \
-        "without_wave=False"
+    default_options = ["shared=False", "cppstd=17", "header_only=False", "fPIC=True", "layout=system"]
+    default_options.extend(["without_%s=False" % libname for libname in lib_list])
 
     url = "https://github.com/lasote/conan-boost"
-    exports = ["FindBoost.cmake", "OriginalFindBoost*"]
     license = "Boost Software License - Version 1.0. http://www.boost.org/LICENSE_1_0.txt"
     short_paths = True
     no_copy_source = True
 
     def config_options(self):
-        """ First configuration step. Only settings are defined. Options can be removed
-        according to these settings
-        """
         if self.settings.compiler == "Visual Studio":
             self.options.remove("fPIC")
 
     def configure(self):
-        """ Second configuration step. Both settings and options have values, in this case
-        we can force static library if MT was specified as runtime
-        """
         if self.options.header_only:
-            # Should be doable in conan_info() but the UX is not ready
             self.options.remove("shared")
             self.options.remove("fPIC")
             self.options.remove("layout")
@@ -129,8 +65,8 @@ class BoostConan(ConanFile):
             # The Python library is compiled with "MD", so we cannot link against it in "MT" builds
             self.options.without_python = True
 
-        # Disable Python build on Windows when:
         if self.settings.os == "Windows":
+            # Disable Python build on Windows when:
             if self.settings.compiler == "gcc":
                 # As for Mingw gcc we don't have (yet) the compiler_redirect infrastructure,
                 # disabling the Boost.Python library to avoid hitting this problem:
@@ -141,6 +77,9 @@ class BoostConan(ConanFile):
                (self.settings.arch == "x86" and platform.architecture()[0] != "32bit"):
                # Python architecture should match the build one (32 vs 64 bit)
                 self.options.without_python = True
+        else:
+            # On other platforms Python build disabled by default
+            self.options.without_python = True
 
         if self.settings.os == "Windows" and self.settings.compiler == "gcc":
             # Also we need to build with _GLIBCXX_USE_CXX11_ABI = 1 to avoid linker errors such as:
@@ -159,7 +98,7 @@ class BoostConan(ConanFile):
         self.output.info("Downloading boost...")
         if not os.path.isdir("boost"):
             self.run('git clone -b boost-%s --recursive \
-            --single-branch https://github.com/boostorg/boost.git' % self.version)
+            --single-branch %s' % (self.version, boost_git))
         else:
             self.run("cd boost && git pull")
 
@@ -194,7 +133,7 @@ class BoostConan(ConanFile):
 
         # Note: bootstrap and b2 headers change the source folder which may be shared between
         # build variants.
-        # This should be safe as bootstrap buils from scratch each time and the result of
+        # This should be safe as bootstrap builds from scratch each time and the result of
         # b2 headers is usable across build variants.
         self._bootstrap(abs_source_folder)
         self._b2_headers(abs_source_folder)
@@ -331,43 +270,9 @@ class BoostConan(ConanFile):
 
     def _get_build_args_libraries(self):
         args = []
-        option_names = {
-            "--without-atomic": self.options.without_atomic,
-            "--without-chrono": self.options.without_chrono,
-            "--without-container": self.options.without_container,
-            "--without-context": self.options.without_context,
-            "--without-coroutine": self.options.without_coroutine,
-            "--without-coroutine2": self.options.without_coroutine2,
-            "--without-date_time": self.options.without_date_time,
-            "--without-exception": self.options.without_exception,
-            "--without-fiber": self.options.without_fiber,
-            "--without-filesystem": self.options.without_filesystem,
-            "--without-graph": self.options.without_graph,
-            "--without-graph_parallel": self.options.without_graph_parallel,
-            "--without-iostreams": self.options.without_iostreams,
-            "--without-locale": self.options.without_locale,
-            "--without-log": self.options.without_log,
-            "--without-math": self.options.without_math,
-            "--without-metaparse": self.options.without_metaparse,
-            "--without-mpi": self.options.without_mpi,
-            "--without-program_options": self.options.without_program_options,
-            "--without-python": self.options.without_python,
-            "--without-random": self.options.without_random,
-            "--without-regex": self.options.without_regex,
-            "--without-serialization": self.options.without_serialization,
-            "--without-signals": self.options.without_signals,
-            "--without_stacktrace": self.options.without_stacktrace,
-            "--without-system": self.options.without_system,
-            "--without-test": self.options.without_test,
-            "--without-thread": self.options.without_thread,
-            "--without-timer": self.options.without_timer,
-            "--without-type_erasure": self.options.without_type_erasure,
-            "--without-wave": self.options.without_wave
-        }
-
-        for option_name, activated in option_names.items():
-            if activated:
-                args.append(option_name)
+        for libname in lib_list:
+            if getattr(self.options, "without_%s" % libname):
+                args.append("--without-%s" % libname)
         return args
 
     def _get_build_cppflags_linkflags_defines(self):
