@@ -43,6 +43,7 @@ class BoostConan(ConanFile):
 
     default_options = ["shared=False", "cppstd=17", "header_only=False", "fPIC=True", "layout=system"]
     default_options.extend(["without_%s=False" % libname for libname in lib_list])
+    default_options = tuple(default_options)
 
     url = "https://github.com/lasote/conan-boost"
     license = "Boost Software License - Version 1.0. http://www.boost.org/LICENSE_1_0.txt"
