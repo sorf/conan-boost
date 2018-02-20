@@ -7,18 +7,18 @@ import sys
 class DefaultNameConan(ConanFile):
     name = "DefaultName"
     version = "0.1"
-    settings = "os", "compiler", "build_type", "arch", "os_build", "arch_build"
+    settings = "os", "arch", "compiler", "build_type"
     generators = "cmake"
 
     def configure(self):
-        if self.options["Boost"].header_only:
+        if self.options["boost"].header_only:
             self.settings.clear()
 
     def build(self):
         cmake = CMake(self)
-        if self.options["Boost"].header_only:
+        if self.options["boost"].header_only:
             cmake.definitions["HEADER_ONLY"] = "TRUE"
-        if not self.options["Boost"].without_python:
+        if not self.options["boost"].without_python:
             cmake.definitions["WITH_PYTHON"] = "TRUE"
             if self.settings.os == "Windows":
                 python_folder = os.path.dirname(sys.executable)
@@ -36,7 +36,7 @@ class DefaultNameConan(ConanFile):
                         cmake.definitions["BOOST_PYTHON_LIB"] = lib
                         break
 
-        if not self.options["Boost"].without_regex:
+        if not self.options["boost"].without_regex:
             cmake.definitions["WITH_REGEX"] = "TRUE"
             for lib in self.deps_cpp_info.libs:
                 if "regex" in lib:
@@ -53,11 +53,11 @@ class DefaultNameConan(ConanFile):
         data_file = os.path.join(self.source_folder, "data.txt")
         self.output.info("Running: lambda")
         self.run("cd bin && .%slambda < %s" % (os.sep, data_file))
-        if not self.options["Boost"].header_only:
-            if not self.options["Boost"].without_regex:
+        if not self.options["boost"].header_only:
+            if not self.options["boost"].without_regex:
                 self.output.info("Running: regex_exe")
                 self.run("cd bin && .%sregex_exe < %s" % (os.sep, data_file))
-            if not self.options["Boost"].without_python:
+            if not self.options["boost"].without_python:
                 os.chdir("bin")
                 sys.path.append(".")
                 import hello_ext
