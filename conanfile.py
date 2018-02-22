@@ -1,27 +1,31 @@
+""" Conan recipe for Boost."""
 import os
 import platform
-import re
 import shutil
-import subprocess
 import sys
 from conans import ConanFile
 from conans import tools
+from conan_utils.compiler_version import check_gpp_version, check_clangpp_version
 
 if (sys.version_info.major, sys.version_info.minor) < (3, 5):
     raise RuntimeError("Python 3.5 is required")
 
-boost_git = 'https://github.com/boostorg/boost.git'
+BOOST_GIT = 'https://github.com/boostorg/boost.git'
 
 # From from *1 (see below, b2 --show-libraries), also ordered following linkage order
 # see https://github.com/Kitware/CMake/blob/master/Modules/FindBoost.cmake to know the order
-
-lib_list = ['math', 'wave', 'container', 'exception', 'graph', 'iostreams', 'locale', 'log',
+LIB_LIST = ['math', 'wave', 'container', 'exception', 'graph', 'iostreams', 'locale', 'log',
             'program_options', 'random', 'regex', 'mpi', 'serialization', 'signals',
             'coroutine', 'fiber', 'context', 'timer', 'thread', 'chrono', 'date_time',
             'atomic', 'filesystem', 'system', 'graph_parallel', 'python',
             'stacktrace', 'test', 'type_erasure']
 
+def _remove_if_exists(file):
+    if os.path.exists(file) and os.path.isfile(file):
+        os.remove(file)
+
 class BoostConan(ConanFile):
+    """ Conan recipe for Boost."""
     name = "boost"
     version = "1.66.0"
     settings = "os", "arch", "compiler", "build_type"
@@ -39,13 +43,17 @@ class BoostConan(ConanFile):
         "fPIC": [True, False],
         "layout" : ["versioned", "tagged", "system"]
     }
-    options.update({"without_%s" % libname: [True, False] for libname in lib_list})
+    options.update({"without_%s" % libname: [True, False] for libname in LIB_LIST})
 
-    default_options = ["shared=False", "cppstd=17", "header_only=False", "fPIC=True", "layout=system"]
-    default_options.extend(["without_%s=False" % libname for libname in lib_list])
+    default_options = [
+        "shared=False",
+        "cppstd=17",
+        "header_only=False",
+        "fPIC=True",
+        "layout=system"]
+    default_options.extend(["without_%s=False" % libname for libname in LIB_LIST])
     default_options = tuple(default_options)
 
-    url = "https://github.com/lasote/conan-boost"
     license = "Boost Software License - Version 1.0. http://www.boost.org/LICENSE_1_0.txt"
     short_paths = True
     no_copy_source = True
@@ -69,8 +77,7 @@ class BoostConan(ConanFile):
         if self.settings.os == "Windows":
             # Disable Python build on Windows when:
             if self.settings.compiler == "gcc":
-                # As for Mingw gcc we don't have (yet) the compiler_redirect infrastructure,
-                # disabling the Boost.Python library to avoid hitting this problem:
+                # For Mingw gcc disabling the Boost.Python library to avoid hitting this problem:
                 # https://github.com/Alexpux/MINGW-packages/issues/3224
                 # https://stackoverflow.com/questions/10660524/error-building-boost-1-49-0-with-gcc-4-7-0/12124708#12124708
                 self.options.without_python = True
@@ -84,8 +91,8 @@ class BoostConan(ConanFile):
 
         if self.settings.os == "Windows" and self.settings.compiler == "gcc":
             # Also we need to build with _GLIBCXX_USE_CXX11_ABI = 1 to avoid linker errors such as:
-            #   libstdc++.a(cow-stdexcept.o):cow-stdexcept.cc:(.text$_ZNSt13runtime_errorC2ERKS_+0x0):
-            #   multiple definition of `std::runtime_error::runtime_error(std::runtime_error const&)'
+            # libstdc++.a(cow-stdexcept.o):cow-stdexcept.cc:(.text$_ZNSt13runtime_errorC2ERKS_+0x0):
+            # multiple definition of `std::runtime_error::runtime_error(std::runtime_error const&)'
             # So, we set/overwrite the libcxx setting to libstdc++11
             if not self.settings.compiler.libcxx or self.settings.compiler.libcxx != "libstdc++11":
                 self.output.warn('Forcing compiler.libcxx to be "libstdc++11"')
@@ -99,7 +106,7 @@ class BoostConan(ConanFile):
         self.output.info("Downloading boost...")
         if not os.path.isdir("boost"):
             self.run('git clone -b boost-%s --recursive \
-            --single-branch %s' % (self.version, boost_git))
+            --single-branch %s' % (self.version, BOOST_GIT))
         else:
             self.run("cd boost && git pull")
 
@@ -156,25 +163,12 @@ class BoostConan(ConanFile):
         self.run(command)
 
     def _check_build_settings(self):
-        if self.settings.compiler == "gcc":
-            self.output.info("Checking g++ version (expecting: %s)" %
-                             self.settings.compiler.version)
-            # the build will calling 'g++' without any version (the compiler_redirect support)
-            result = subprocess.run(
-                ["g++", "--version"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                check=True,
-                universal_newlines=True)
-            if not re.match(r"g\+\+ \(.*\) %s" % self.settings.compiler.version, result.stdout):
-                self.output.error("Expected version %s was not found in:\n%s" % (
-                    self.settings.compiler.version,
-                    result.stdout))
-                raise RuntimeError("Unexpected compiler version")
-
-    def _remove_if_exists(self, file):
-        if os.path.exists(file) and os.path.isfile(file):
-            os.remove(file)
+        if self.settings.compiler == "gcc" and\
+            not check_gpp_version(self.settings.compiler.version):
+            raise RuntimeError("Unexpected compiler version")
+        if self.settings.compiler == "clang" and\
+            not check_clangpp_version(self.settings.compiler.version):
+            raise RuntimeError("Unexpected compiler version")
 
     def _bootstrap(self, abs_source_folder):
         with_toolset = {"apple-clang": "darwin"}.get(str(self.settings.compiler),
@@ -185,10 +179,10 @@ class BoostConan(ConanFile):
 
         if self.settings.os == "Windows":
             # Deleting old b2 binaries
-            self._remove_if_exists(tools_build_folder + "\\src\\engine\\bin.ntx86\\b2.exe")
-            self._remove_if_exists(tools_build_folder + "\\src\\engine\\bin.ntx86\\bjam.exe")
-            self._remove_if_exists(tools_build_folder + "\\src\\engine\\bin.ntx86_64\\bjam.exe")
-            self._remove_if_exists(tools_build_folder + "\\src\\engine\\bin.ntx86_64\\bjam.exe")
+            _remove_if_exists(tools_build_folder + "\\src\\engine\\bin.ntx86\\b2.exe")
+            _remove_if_exists(tools_build_folder + "\\src\\engine\\bin.ntx86\\bjam.exe")
+            _remove_if_exists(tools_build_folder + "\\src\\engine\\bin.ntx86_64\\bjam.exe")
+            _remove_if_exists(tools_build_folder + "\\src\\engine\\bin.ntx86_64\\bjam.exe")
 
         command = "cd %s && " % tools_build_folder
         command += ".\\bootstrap" if self.settings.os == "Windows" \
@@ -212,8 +206,8 @@ class BoostConan(ConanFile):
                     print(fin.read(), end="")
                 print("\n----------")
             raise
-        b2 = "b2.exe" if self.settings.os == "Windows" else "b2"
-        shutil.copy(os.path.join(tools_build_folder, b2), boost_source_folder)
+        b2_exe = "b2.exe" if self.settings.os == "Windows" else "b2"
+        shutil.copy(os.path.join(tools_build_folder, b2_exe), boost_source_folder)
 
     def _b2_headers(self, abs_source_folder):
         command = "cd %s && " % (os.path.join(abs_source_folder, "boost"))
@@ -239,7 +233,6 @@ class BoostConan(ConanFile):
             args.append("toolset=msvc-%s" % self._msvc_version())
         elif str(self.settings.compiler) in ["clang", "gcc"]:
             # For clang / gcc we use the toolset as the compiler name (without any version).
-            # (see linux_compiler_redirect)
             args.append("toolset=%s" % self.settings.compiler)
         elif str(self.settings.compiler) == "apple-clang":
             args.append("toolset=darwin")
@@ -262,7 +255,7 @@ class BoostConan(ConanFile):
 
         # The compiler and linker flags
         cppflags, linkflags, defines = self._get_build_cppflags_linkflags_defines()
-        
+
         args.append('cxxflags="%s"' % " ".join(cppflags) if cppflags else "")
         args.append('linkflags="%s"' % " ".join(linkflags) if linkflags else "")
         for define in defines:
@@ -271,14 +264,13 @@ class BoostConan(ConanFile):
 
     def _get_build_args_libraries(self):
         args = []
-        for libname in lib_list:
+        for libname in LIB_LIST:
             if getattr(self.options, "without_%s" % libname):
                 args.append("--without-%s" % libname)
         return args
 
     def _get_build_cppflags_linkflags_defines(self):
-        """ C++ compiler flags, linker flags and defines.
-            They are used both in build() and package_info(). """
+        """ C++ compiler flags, linker flags and defines. """
         cppflags = []
         linkflags = []
         defines = []

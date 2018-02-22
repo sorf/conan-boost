@@ -13,7 +13,7 @@ if __name__ == "__main__":
         options={"Boost:shared": "True"})
     builder.add(
         settings={"compiler": "gcc", "compiler.version": str(gcc_version),
-                  "compiler.libcxx": "libstdc++11",        
+                  "compiler.libcxx": "libstdc++11",
                   "arch": "x86_64", "build_type": "Debug"},
         options={"Boost:shared": "True"})
     builder.add(
